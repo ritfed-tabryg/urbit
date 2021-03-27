@@ -1,15 +1,14 @@
 /* vere/db/lmdb.c
 */
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#include <lmdb.h>
-
 #include "c/portable.h"
 #include "c/types.h"
 #include "c/defs.h"
+
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include <lmdb.h>
 
 #include <vere/db/lmdb.h>
 
