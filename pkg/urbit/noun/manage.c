@@ -1619,6 +1619,7 @@ _cm_signals(void)
   // signal(SIGINT, _loom_stop);
 
 
+# if defined(U3_OS_PROF)
   //  Block SIGPROF, so that if/when we reactivate it on the
   //  main thread for profiling, we won't get hits in parallel
   //  on other threads.
@@ -1633,6 +1634,7 @@ _cm_signals(void)
       exit(1);
     }
   }
+# endif
 }
 
 /* u3m_init(): start the environment.
