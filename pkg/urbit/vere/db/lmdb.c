@@ -499,6 +499,7 @@ u3_lmdb_save_meta(MDB_env*    env_u,
   return c3y;
 }
 
+#if !defined(U3_OS_mingw)
 /* mdb_logerror(): writes an error message and lmdb error code to f.
 */
 void mdb_logerror(FILE* f, int err, const char* fmt, ...)
@@ -509,3 +510,4 @@ void mdb_logerror(FILE* f, int err, const char* fmt, ...)
   va_end(ap);
   fprintf(f, ": %s\r\n", mdb_strerror(err));
 }
+#endif

@@ -1558,6 +1558,10 @@ u3m_wall(u3_noun wol)
 static void
 _cm_limits(void)
 {
+# ifdef U3_OS_mingw
+  //  Windows doesn't have rlimits. Default maximum thread
+  //  stack size is set in the executable file header.
+# else
   struct rlimit rlm;
 
   //  Moar stack.
@@ -1604,6 +1608,7 @@ _cm_limits(void)
       u3l_log("boot: core limit: %s\r\n", strerror(errno));
     }
   }
+# endif
 # endif
 }
 
