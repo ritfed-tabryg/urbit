@@ -12,6 +12,10 @@
 
 #include <vere/db/lmdb.h>
 
+/* mdb_logerror(): writes an error message and lmdb error code to f.
+*/
+void mdb_logerror(FILE* f, int err, const char* fmt, ...);
+
 //  lmdb api wrapper
 //
 //    this module implements a simple persistence api on top of lmdb.
@@ -41,31 +45,28 @@ u3_lmdb_init(const c3_c* pax_c, size_t siz_i)
   c3_w     ret_w;
 
   if ( (ret_w = mdb_env_create(&env_u)) ) {
-    fprintf(stderr, "lmdb: init fail: %s\r\n", mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: init fail");
     return 0;
   }
 
   //  Our databases have two tables: META and EVENTS
   //
   if ( (ret_w = mdb_env_set_maxdbs(env_u, 2)) ) {
-    fprintf(stderr, "lmdb: failed to set number of databases: %s\r\n",
-                    mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: failed to set number of databases");
     //  XX dispose env_u
     //
     return 0;
   }
 
   if ( (ret_w = mdb_env_set_mapsize(env_u, siz_i)) ) {
-    fprintf(stderr, "lmdb: failed to set database size: %s\r\n",
-                    mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: failed to set database size");
     //  XX dispose env_u
     //
     return 0;
   }
 
   if ( (ret_w = mdb_env_open(env_u, pax_c, 0, 0664)) ) {
-    fprintf(stderr, "lmdb: failed to open event log: %s\r\n",
-                     mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: failed to open event log");
     //  XX dispose env_u
     //
     return 0;
@@ -139,7 +140,7 @@ u3_lmdb_gulf(MDB_env* env_u, c3_d* low_d, c3_d* hig_d)
   //    XX why no MDB_RDONLY?
   //
   if ( (ret_w = mdb_txn_begin(env_u, 0, 0, &txn_u)) ) {
-    fprintf(stderr, "lmdb: gulf: txn_begin fail: %s\r\n", mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: gulf: txn_begin fail");
     return c3n;
   }
 
@@ -149,7 +150,7 @@ u3_lmdb_gulf(MDB_env* env_u, c3_d* low_d, c3_d* hig_d)
     c3_w ops_w = MDB_CREATE | MDB_INTEGERKEY;
 
     if ( (ret_w = mdb_dbi_open(txn_u, "EVENTS", ops_w, &mdb_u)) ) {
-      fprintf(stderr, "lmdb: gulf: dbi_open fail: %s\r\n", mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: gulf: dbi_open fail");
       //  XX confirm
       //
       mdb_txn_abort(txn_u);
@@ -166,8 +167,7 @@ u3_lmdb_gulf(MDB_env* env_u, c3_d* low_d, c3_d* hig_d)
     //  creates a cursor to point to the last event
     //
     if ( (ret_w = mdb_cursor_open(txn_u, mdb_u, &cur_u)) ) {
-      fprintf(stderr, "lmdb: gulf: cursor_open fail: %s\r\n",
-                      mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: gulf: cursor_open fail");
       //  XX confirm
       //
       mdb_txn_abort(txn_u);
@@ -186,8 +186,7 @@ u3_lmdb_gulf(MDB_env* env_u, c3_d* low_d, c3_d* hig_d)
       return c3y;
     }
     else if ( ret_w ) {
-      fprintf(stderr, "lmdb: gulf: head fail: %s\r\n",
-                      mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: gulf: head fail");
       mdb_cursor_close(cur_u);
       mdb_txn_abort(txn_u);
       return c3n;
@@ -210,7 +209,7 @@ u3_lmdb_gulf(MDB_env* env_u, c3_d* low_d, c3_d* hig_d)
     mdb_txn_abort(txn_u);
 
     if ( ret_w ) {
-      fprintf(stderr, "lmdb: gulf: last fail: %s\r\n", mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: gulf: last fail");
       return c3n;
     }
     else {
@@ -237,7 +236,7 @@ u3_lmdb_read(MDB_env* env_u,
   //  create a read-only transaction.
   //
   if ( (ret_w = mdb_txn_begin(env_u, 0, MDB_RDONLY, &txn_u)) ) {
-    fprintf(stderr, "lmdb: read txn_begin fail: %s\r\n", mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: read txn_begin fail");
     return c3n;
   }
 
@@ -247,7 +246,7 @@ u3_lmdb_read(MDB_env* env_u,
     c3_w ops_w = MDB_CREATE | MDB_INTEGERKEY;
 
     if ( (ret_w = mdb_dbi_open(txn_u, "EVENTS", ops_w, &mdb_u)) ) {
-      fprintf(stderr, "lmdb: read: dbi_open fail: %s\r\n", mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: read: dbi_open fail");
       //  XX confirm
       //
       mdb_txn_abort(txn_u);
@@ -266,8 +265,7 @@ u3_lmdb_read(MDB_env* env_u,
     //  creates a cursor to iterate over keys starting at [eve_d]
     //
     if ( (ret_w = mdb_cursor_open(txn_u, mdb_u, &cur_u)) ) {
-      fprintf(stderr, "lmdb: read: cursor_open fail: %s\r\n",
-                      mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: read: cursor_open fail");
       //  XX confirm
       //
       mdb_txn_abort(txn_u);
@@ -277,9 +275,7 @@ u3_lmdb_read(MDB_env* env_u,
     //  set the cursor to the position of [eve_d]
     //
     if ( (ret_w = mdb_cursor_get(cur_u, &key_u, &val_u, MDB_SET_KEY)) ) {
-      fprintf(stderr, "lmdb: read: initial cursor_get failed at %" PRIu64 ": %s\r\n",
-                      eve_d,
-                      mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: read: initial cursor_get failed at %" PRIu64, eve_d);
       mdb_cursor_close(cur_u);
       //  XX confirm
       //
@@ -324,8 +320,7 @@ u3_lmdb_read(MDB_env* env_u,
         if (  (ret_w = mdb_cursor_get(cur_u, &key_u, &val_u, MDB_NEXT))
            && (MDB_NOTFOUND != ret_w) )
         {
-          fprintf(stderr, "lmdb: read: error: %s\r\n",
-                          mdb_strerror(ret_w));
+          mdb_logerror(stderr, ret_w, "lmdb: read: error");
           ret_o = c3n;
           break;
         }
@@ -358,7 +353,7 @@ u3_lmdb_save(MDB_env* env_u,
   //  create a write transaction
   //
   if ( (ret_w = mdb_txn_begin(env_u, 0, 0, &txn_u)) ) {
-    fprintf(stderr, "lmdb: write: txn_begin fail: %s\r\n", mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: write: txn_begin fail");
     return c3n;
   }
 
@@ -368,7 +363,7 @@ u3_lmdb_save(MDB_env* env_u,
     c3_w ops_w = MDB_CREATE | MDB_INTEGERKEY;
 
     if ( (ret_w = mdb_dbi_open(txn_u, "EVENTS", ops_w, &mdb_u)) ) {
-      fprintf(stderr, "lmdb: write: dbi_open fail: %s\r\n", mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: write: dbi_open fail");
       mdb_txn_abort(txn_u);
       return c3n;
     }
@@ -400,7 +395,7 @@ u3_lmdb_save(MDB_env* env_u,
   //  commit transaction
   //
   if ( (ret_w = mdb_txn_commit(txn_u)) ) {
-    fprintf(stderr, "lmdb: write failed: %s\r\n", mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: write failed");
     return c3n;
   }
 
@@ -422,16 +417,14 @@ u3_lmdb_read_meta(MDB_env*    env_u,
   //  create a read transaction
   //
   if ( (ret_w = mdb_txn_begin(env_u, 0, MDB_RDONLY, &txn_u)) ) {
-    fprintf(stderr, "lmdb: meta read: txn_begin fail: %s\r\n",
-                    mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: meta read: txn_begin fail");
     return read_f(ptr_v, 0, 0);
   }
 
   //  open the database in the transaction
   //
   if ( (ret_w =  mdb_dbi_open(txn_u, "META", 0, &mdb_u)) ) {
-    fprintf(stderr, "lmdb: meta read: dbi_open fail: %s\r\n",
-                    mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: meta read: dbi_open fail");
     mdb_txn_abort(txn_u);
     return read_f(ptr_v, 0, 0);
   }
@@ -442,7 +435,7 @@ u3_lmdb_read_meta(MDB_env*    env_u,
     MDB_val val_u;
 
     if ( (ret_w = mdb_get(txn_u, mdb_u, &key_u, &val_u)) ) {
-      fprintf(stderr, "lmdb: read failed: %s\r\n", mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: read failed");
       mdb_txn_abort(txn_u);
       return read_f(ptr_v, 0, 0);
     }
@@ -471,16 +464,14 @@ u3_lmdb_save_meta(MDB_env*    env_u,
   //  create a write transaction
   //
   if ( (ret_w = mdb_txn_begin(env_u, 0, 0, &txn_u)) ) {
-    fprintf(stderr, "lmdb: meta write: txn_begin fail: %s\r\n",
-                    mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: meta write: txn_begin fail");
     return c3n;
   }
 
   //  opens the database in the transaction
   //
   if ( (ret_w = mdb_dbi_open(txn_u, "META", MDB_CREATE, &mdb_u)) ) {
-    fprintf(stderr, "lmdb: meta write: dbi_open fail: %s\r\n",
-                    mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: meta write: dbi_open fail");
     mdb_txn_abort(txn_u);
     return c3n;
   }
@@ -492,7 +483,7 @@ u3_lmdb_save_meta(MDB_env*    env_u,
     MDB_val val_u = { .mv_size = val_i,         .mv_data = val_p };
 
     if ( (ret_w = mdb_put(txn_u, mdb_u, &key_u, &val_u, 0)) ) {
-      fprintf(stderr, "lmdb: write failed: %s\r\n", mdb_strerror(ret_w));
+      mdb_logerror(stderr, ret_w, "lmdb: write failed");
       mdb_txn_abort(txn_u);
       return c3n;
     }
@@ -501,10 +492,20 @@ u3_lmdb_save_meta(MDB_env*    env_u,
   //  commit txn
   //
   if ( (ret_w = mdb_txn_commit(txn_u)) ) {
-    fprintf(stderr, "lmdb: meta write: commit failed: %s\r\n",
-                    mdb_strerror(ret_w));
+    mdb_logerror(stderr, ret_w, "lmdb: meta write: commit failed");
     return c3n;
   }
 
   return c3y;
+}
+
+/* mdb_logerror(): writes an error message and lmdb error code to f.
+*/
+void mdb_logerror(FILE* f, int err, const char* fmt, ...)
+{
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(f, fmt, ap);
+  va_end(ap);
+  fprintf(f, ": %s\r\n", mdb_strerror(err));
 }
