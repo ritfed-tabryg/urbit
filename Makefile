@@ -4,7 +4,7 @@ build:
 	nix-build -A urbit -A herb --no-out-link
 
 install:
-	nix-env -f . -iA urbit -iA herb
+	nix-env -f . -iA urbit -iA herb -iA hs.urbit-king.components.exes.urbit-king
 
 release:
 	sh/release

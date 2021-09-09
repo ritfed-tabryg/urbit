@@ -1,6 +1,6 @@
 { lib, stdenv, coreutils, pkgconfig, argon2u, cacert, ca-bundle, curlMinimal
 , ed25519, ent, ge-additions, gmp, h2o, herb, ivory, libaes_siv, libscrypt
-, libsigsegv, libuv, lmdb, murmur3, openssl, secp256k1, softfloat3, zlib
+, libsigsegv, libuv, linuxHeaders, lmdb, murmur3, openssl, secp256k1, softfloat3, zlib
 , enableStatic ? stdenv.hostPlatform.isStatic, enableDebug ? false
 , doCheck ? true, enableParallelBuilding ? true, dontStrip ? true }:
 
@@ -33,6 +33,7 @@ in stdenv.mkDerivation {
     libscrypt
     libsigsegv
     libuv
+    linuxHeaders  # TODO: disable on non-Linux OSes
     lmdb
     murmur3
     openssl

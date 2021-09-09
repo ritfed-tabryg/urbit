@@ -28,7 +28,7 @@ all_exes   = $(test_exes) $(bench_exes) ./build/urbit ./build/urbit-worker
 
 # -Werror promotes all warnings that are enabled into errors (this is on)
 # -Wall issues all types of errors.  This is off (for now)
-CFLAGS := $(CFLAGS)
+CFLAGS := $(CFLAGS) -DU3_SNAPSHOT_VALIDATION # XXX do not commit
 
 ################################################################################
 

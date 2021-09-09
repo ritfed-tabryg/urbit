@@ -51,7 +51,11 @@
   **/
     /* u3_Pool / u3P: global memory control.
     */
-      c3_global u3e_pool u3e_Pool;
+      // TODO: the `volatile` is for the sake of the userfaultfd thread,
+      // which should really use a proper pthreads locking mechanism
+      // (despite the fact that the threads run in lockstep and will never
+      // *actually* concurrently access this variable)
+      /*TODO volatile*/ c3_global u3e_pool u3e_Pool;
 #     define u3P u3e_Pool
 
   /** Constants.
@@ -60,6 +64,13 @@
 
   /** Functions.
   **/
+#   if defined(U3_OS_linux)
+    /* u3e_fault_thread(): listen to memory events from a userfaultfd.
+    */
+      void*
+      u3e_fault_thread(void* ptr_v);
+#   endif
+
     /* u3e_fault(): handle a memory event with libsigsegv protocol.
     */
       c3_i

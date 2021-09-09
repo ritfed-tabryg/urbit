@@ -18,13 +18,14 @@ in {
     ];
   });
 
-  curlMinimal = prev.curl.override {
-    http2Support = false;
-    scpSupport = false;
-    gssSupport = false;
-    ldapSupport = false;
-    brotliSupport = false;
-  };
+  # TODO temporary
+  #curlMinimal = prev.curl.override {
+  #  http2Support = false;
+  #  scpSupport = false;
+  #  gssSupport = false;
+  #  ldapSupport = false;
+  #  brotliSupport = false;
+  #};
 
   lmdb = prev.lmdb.overrideAttrs (attrs: {
     patches =

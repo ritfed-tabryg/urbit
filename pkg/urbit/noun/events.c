@@ -6,6 +6,11 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#if defined(U3_OS_linux)
+#include <sys/ioctl.h>
+#include <linux/userfaultfd.h>
+#endif
+
 #ifdef U3_SNAPSHOT_VALIDATION
 /* Image check.
 */
@@ -106,6 +111,100 @@ _ce_mapfree(void* map_v)
   c3_assert(0 == res_i);
 }
 #endif
+
+#if defined(U3_OS_linux)
+/* u3e_fault_thread(): listen to memory events from a userfaultfd.
+*/
+void*
+u3e_fault_thread(void* ptr_v)
+{
+  c3_i fal_i = (c3_ps)ptr_v;  // TODO ew
+
+  while ( 1 ) {
+    struct uffd_msg msg_u;
+    if ( sizeof(msg_u) != read(fal_i, &msg_u, sizeof(msg_u)) ) {
+      // TODO: does printf still have to be used here or can we use u3l_log?
+      fprintf(stderr, "failed to read from userfaultfd: %s\n", strerror(errno));
+      c3_assert(0);
+    }
+
+    if ( UFFD_EVENT_PAGEFAULT != msg_u.event ||
+         0 == (msg_u.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP) )
+    {
+      fprintf(stderr, "read userfaultfd event of wrong type\n");
+    }
+
+    // TODO: unify handling in u3e_fault and u3e_fault_thread
+    // i.e. wrapper function for each way of handling it
+    // get mingw to use it too probably
+
+    // TODO: how does libsigsegv know what a "serious" fault is,
+    // i.e. when ser_i == 1? such faults should not be handled here,
+    // but I have a feeling they wouldn't trigger the uffd anyway
+
+    c3_w* adr_w = (c3_w*) msg_u.arg.pagefault.address;
+
+    // TODO: this should never happen, because only the range within loom is handled
+    // handled by the userfaultfd
+    if ( (adr_w < u3_Loom) || (adr_w >= (u3_Loom + u3a_words)) ) {
+      // TODO: printing addr wrong
+      fprintf(stderr, "XXX from fault thread XXX: address %llu out of loom!\r\n", msg_u.arg.pagefault.address);
+      fprintf(stderr, "XXX from fault thread XXX: loom: [%p : %p)\r\n", u3_Loom, u3_Loom + u3a_words);
+      c3_assert(0);
+    }
+
+    c3_w off_w = (adr_w - u3_Loom);
+    // TODO: I don't understand this. include/noun/allocate.h says pages are
+    // 16K but 2^12 is only 4096 (which makes sense as an actual native page
+    // size, but is not what the comment on u3a_page says.
+    c3_w pag_w = off_w >> u3a_page;
+    c3_w blk_w = (pag_w >> 5);
+    c3_w bit_w = (pag_w & 31);
+
+    if ( 0 != (u3P.dit_w[blk_w] & (1 << bit_w)) ) {
+      fprintf(stderr, "XXX from fault thread XXX: strange page: %d, at %p, off %x\r\n",
+              pag_w, adr_w, off_w);
+      c3_assert(0);
+    }
+
+    u3P.dit_w[blk_w] |= (1 << bit_w);
+
+    struct uffdio_writeprotect pot_u;
+    //pot_u.range.start = msg_u.arg.pagefault.address & ~(page_size - 1);
+    pot_u.range.start = (c3_p)u3_Loom + (pag_w << u3a_page);
+    pot_u.range.len = (1 << (u3a_page + 2));
+    pot_u.mode = 0;
+    if ( -1 == ioctl(fal_i, UFFDIO_WRITEPROTECT, &pot_u) ) {
+      fprintf(stderr, "XXX from fault thread XXX: loom: fault mprotect: %s\r\n", strerror(errno));
+      c3_assert(0);
+    }
+  }
+  // TODO: properly close file descriptor
+}
+#endif
+
+/* TODO
+
+ * The type of a global SIGSEGV handler.
+ * The fault address, with the bits (SIGSEGV_FAULT_ADDRESS_ALIGNMENT - 1)
+ * cleared, is passed as argument.
+ * The access type (read access or write access) is not passed; your handler
+ * has to know itself how to distinguish these two cases.
+ * The second argument is 0, meaning it could also be a stack overflow, or 1,
+ * meaning the handler should seriously try to fix the fault.
+ * The return value should be nonzero if the handler has done its job
+ * and no other handler should be called, or 0 if the handler declines
+ * responsibility for the given address.
+ *
+ * The handler is run at a moment when nothing about the global state of the
+ * program is known. Therefore it cannot use facilities that manipulate global
+ * variables or locks. In particular, it cannot use malloc(); use mmap()
+ * instead. It cannot use fopen(); use open() instead. Etc. All global
+ * variables that are accessed by the handler should be marked 'volatile'.
+
+typedef int (*sigsegv_handler_t) (void* fault_address, int serious);
+
+*/
 
 /* u3e_fault(): handle a memory event with libsigsegv protocol.
 */

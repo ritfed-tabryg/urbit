@@ -10,6 +10,12 @@
 #include <ctype.h>
 #include <openssl/crypto.h>
 
+#if defined(U3_OS_linux)
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <linux/userfaultfd.h>
+#endif
+
 //  XX stack-overflow recovery should be gated by -a
 //
 #undef NO_OVERFLOW
@@ -1638,6 +1644,66 @@ _cm_limits(void)
 # endif
 }
 
+#if defined(U3_OS_linux)
+/* _cm_userfaultfd(): set up a userfaultfd (handles sigsegv on loom, faster)
+*/
+static void
+_cm_userfaultfd(void)
+{
+#ifdef UFFD_USER_MODE_ONLY
+  // Post-Linux 5.11, UFFD_USER_MODE_ONLY needs to be specified if the sysctl
+  // vm.unprivileged_userfaultfd is set to 2 (non-default value) for security:
+  // https://lore.kernel.org/lkml/20201120030411.2690816-2-lokeshgidra@google.com/
+  // TODO: __NR_userfaultfd from linux-headers or SYS_userfaultfd (from glibc I think)?
+  c3_i fal_i = syscall(SYS_userfaultfd, O_CLOEXEC | UFFD_USER_MODE_ONLY); // TODO: does it need O_NONBLOCK?
+  if ( -1 == fal_i && EINVAL == errno ) {
+    // We could just be on an older kernel, try again without UFFD_USER_MODE_ONLY
+    fal_i = syscall(SYS_userfaultfd, O_CLOEXEC);
+  }
+#else
+  c3_i fal_i = syscall(SYS_userfaultfd, O_CLOEXEC);
+#endif
+  if ( -1 == fal_i ) {
+    u3l_log("boot: userfaultfd open failed: %s\n", strerror(errno));
+    return;
+  }
+
+  struct uffdio_api ape_u;
+  ape_u.api = UFFD_API;
+  ape_u.features = UFFD_FEATURE_PAGEFAULT_FLAG_WP;
+  // TODO: is this checking features correctly
+
+  // handshake: tell Linux API version, EINVAL if not supported
+  // handshake: check Linux supports UFFDIO_REGISTER_MODE_WP
+  if ( -1 == ioctl(fal_i, UFFDIO_API, &ape_u)
+     || 0 == (ape_u.features & UFFD_FEATURE_PAGEFAULT_FLAG_WP)
+     || 0 == (ape_u.ioctls & (1 << _UFFDIO_WRITEPROTECT)) )
+  {
+    u3l_log("boot: userfaultfd does not support write-protect\n");
+    //u3l_log("      please upgrade to Linux 5.7 or later\n");
+    return;
+  }
+
+  // register the fd to send events on write of write-protected pages within loom
+  struct uffdio_register reg_u;
+  reg_u.range.start = (c3_p)u3_Loom;
+  reg_u.range.len = u3a_bytes;
+  reg_u.mode = UFFDIO_REGISTER_MODE_WP;
+  reg_u.ioctls = 0;
+  if ( -1 == ioctl(fal_i, UFFDIO_REGISTER, &reg_u) || 0 == reg_u.ioctls ) {
+    u3l_log("boot: could not register userfaultfd: %s\n", strerror(errno));
+    return;
+  }
+
+  // launch thread to handle page faults
+  pthread_t ted_u;
+  pthread_create(&ted_u, NULL, u3e_fault_thread, (void*)(c3_ps)fal_i);
+  // TODO: do we need to explicitly join this thread
+
+  u3l_log("boot: registered userfaultfd\n");
+}
+#endif
+
 /* _cm_signals(): set up interrupts, etc.
 */
 static void
@@ -1720,6 +1786,10 @@ u3m_init(void)
 
     u3l_log("loom: mapped %dMB\r\n", len_w >> 20);
   }
+
+#if defined(U3_OS_linux)
+  _cm_userfaultfd();
+#endif
 }
 
 /* u3m_boot(): start the u3 system. return next event, starting from 1.
