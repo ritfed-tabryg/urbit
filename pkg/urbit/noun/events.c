@@ -6,6 +6,12 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#if defined(U3_OS_linux)
+#include <linux/userfaultfd.h>
+#include <pthread.h>
+#include <sys/ioctl.h>
+#endif
+
 #ifdef U3_SNAPSHOT_VALIDATION
 /* Image check.
 */
@@ -107,6 +113,66 @@ _ce_mapfree(void* map_v)
 }
 #endif
 
+/* _ce_mprotect(): set memory protection, potentially with userfaultfd.
+*/
+static inline c3_i
+_ce_mprotect(void* adr_v, size_t len_i, c3_o wip_o) {
+#if defined(U3_OS_linux)
+  if ( -1 == u3U ) {
+#endif
+    c3_i pot_i = PROT_READ | (( c3y == wip_o ) ? 0 : PROT_WRITE);
+    return mprotect(adr_v, len_i, pot_i);
+#if defined(U3_OS_linux)
+  } else {
+    struct uffdio_writeprotect pot_u = {
+      .range = { .start = (c3_p)adr_v, .len = len_i, },
+      .mode = ( c3y == wip_o ) ? UFFDIO_WRITEPROTECT_MODE_WP : 0,
+    };
+
+    c3_i ret_i;
+    do {
+      ret_i = ioctl(u3U, UFFDIO_WRITEPROTECT, &pot_u);
+    } while ( -1 == ret_i && EAGAIN == errno );
+
+    return ret_i;
+  }
+#endif
+}
+
+#if defined(U3_OS_linux)
+/* u3e_fault_thread(): listen to memory events from a userfaultfd.
+*/
+void*
+u3e_fault_thread(void* ign_v)
+{
+  c3_assert(-1 != u3U);
+
+  while ( 1 ) {
+    struct uffd_msg msg_u;
+    if ( sizeof(msg_u) != read(u3U, &msg_u, sizeof(msg_u)) ) {
+      u3l_log("failed to read from userfaultfd: %s\r\n", strerror(errno));
+      c3_assert(0);
+    }
+
+    if ( UFFD_EVENT_PAGEFAULT != msg_u.event ||
+         0 == (msg_u.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP) )
+    {
+      u3l_log("read userfaultfd event of wrong type %p %u %llu\r\n",
+              (void*)msg_u.arg.pagefault.address,
+              msg_u.event,
+              msg_u.arg.pagefault.flags);
+      c3_assert(0);
+    }
+
+    u3e_fault((void*)msg_u.arg.pagefault.address, 1);
+  }
+
+  close(u3U);
+  u3U = -1;
+  return NULL;
+}
+#endif
+
 /* u3e_fault(): handle a memory event with libsigsegv protocol.
 */
 c3_i
@@ -153,9 +219,9 @@ u3e_fault(void* adr_v, c3_i ser_i)
 
     u3P.dit_w[blk_w] |= (1 << bit_w);
 
-    if ( -1 == mprotect((void *)(u3_Loom + (pag_w << u3a_page)),
-                        (1 << (u3a_page + 2)),
-                        (PROT_READ | PROT_WRITE)) )
+    if ( -1 == _ce_mprotect((void *)(u3_Loom + (pag_w << u3a_page)),
+                            (1 << (u3a_page + 2)),
+                            c3n) )
     {
       fprintf(stderr, "loom: fault mprotect: %s\r\n", strerror(errno));
       c3_assert(0);
@@ -462,9 +528,9 @@ _ce_patch_save_page(u3_ce_patch* pat_u,
 #endif
     _ce_patch_write_page(pat_u, pgc_w, mem_w);
 
-    if ( -1 == mprotect(u3_Loom + (pag_w << u3a_page),
-                        (1 << (u3a_page + 2)),
-                        PROT_READ) )
+    if ( -1 == _ce_mprotect(u3_Loom + (pag_w << u3a_page),
+                            (1 << (u3a_page + 2)),
+                            c3y) )
     {
       c3_assert(0);
     }
@@ -485,9 +551,9 @@ _ce_patch_junk_page(u3_ce_patch* pat_u,
   c3_w bit_w = (pag_w & 31);
 
   // u3l_log("protect b: page %d\r\n", pag_w);
-  if ( -1 == mprotect(u3_Loom + (pag_w << u3a_page),
-                      (1 << (u3a_page + 2)),
-                      PROT_READ) )
+  if ( -1 == _ce_mprotect(u3_Loom + (pag_w << u3a_page),
+                          (1 << (u3a_page + 2)),
+                          c3y) )
   {
     c3_assert(0);
   }
@@ -867,7 +933,7 @@ u3e_live(c3_o nuu_o, c3_c* dir_c)
                        (u3_Loom + (1 << u3a_bits) - (1 << u3a_page)),
                        -(1 << u3a_page));
 
-        if ( 0 != mprotect((void *)u3_Loom, u3a_bytes, PROT_READ) ) {
+        if ( 0 != _ce_mprotect((void *)u3_Loom, u3a_bytes, c3y) ) {
           u3l_log("loom: live mprotect: %s\r\n", strerror(errno));
           c3_assert(0);
         }
@@ -897,7 +963,7 @@ u3e_yolo(void)
 {
   //    NB: u3e_save() will reinstate protection flags
   //
-  if ( 0 != mprotect((void *)u3_Loom, u3a_bytes, (PROT_READ | PROT_WRITE)) ) {
+  if ( 0 != _ce_mprotect((void *)u3_Loom, u3a_bytes, c3n) ) {
     return c3n;
   }
 

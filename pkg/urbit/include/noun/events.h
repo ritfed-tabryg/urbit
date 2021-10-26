@@ -49,6 +49,13 @@
 
   /** Globals.
   **/
+#   if defined(U3_OS_linux)
+    /* u3_Uffd: userfaultfd(2) file descriptor. -1 if not used.
+    */
+      c3_i u3_Uffd;
+#     define u3U u3_Uffd
+#   endif
+
     /* u3_Pool / u3P: global memory control.
     */
       c3_global u3e_pool u3e_Pool;
@@ -60,6 +67,13 @@
 
   /** Functions.
   **/
+#   if defined(U3_OS_linux)
+    /* u3e_fault_thread(): listen to memory events from a userfaultfd.
+    */
+      void*
+      u3e_fault_thread(void* ptr_v);
+#   endif
+
     /* u3e_fault(): handle a memory event with libsigsegv protocol.
     */
       c3_i

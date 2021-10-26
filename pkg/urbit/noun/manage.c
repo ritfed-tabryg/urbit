@@ -11,6 +11,13 @@
 #include <openssl/crypto.h>
 #include <urcrypt.h>
 
+#if defined(U3_OS_linux)
+#include <linux/userfaultfd.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 //  XX stack-overflow recovery should be gated by -a
 //
 #undef NO_OVERFLOW
@@ -1705,6 +1712,86 @@ _cm_crypto()
   u3je_secp_init();
 }
 
+#if defined(U3_OS_linux)
+/* _cm_userfaultfd(): set up a userfaultfd (handles sigsegv on loom, faster)
+*/
+static void
+_cm_userfaultfd(void)
+{
+#if defined(UFFD_USER_MODE_ONLY)
+  // Post-Linux 5.11, UFFD_USER_MODE_ONLY needs to be specified if the sysctl
+  // vm.unprivileged_userfaultfd is set to 2 (non-default value) for security:
+  // https://lore.kernel.org/lkml/20201120030411.2690816-2-lokeshgidra@google.com/
+  u3U = syscall(SYS_userfaultfd, O_CLOEXEC | UFFD_USER_MODE_ONLY);
+  if ( -1 == u3U && EINVAL == errno ) {
+    // We could just be on an older kernel, try again without UFFD_USER_MODE_ONLY
+    u3U = syscall(SYS_userfaultfd, O_CLOEXEC);
+  }
+#else
+  u3U = syscall(SYS_userfaultfd, O_CLOEXEC);
+#endif
+  if ( -1 == u3U ) {
+    // TODO: if errno == EINVAL, the kernel could just be too old to have uffd.
+    // This should probably have a better error message than "Invalid argument"
+    u3l_log("boot: userfaultfd open failed: %s\r\n", strerror(errno));
+    u3U = -1;
+    return;
+  }
+
+  struct uffdio_api ape_u = {
+    .api = UFFD_API,
+    .features = UFFD_FEATURE_PAGEFAULT_FLAG_WP,
+  };
+  // Handshake: check kernel supports API version in headers & write-protect mode
+  c3_i ret_i;
+  do {
+    ret_i = ioctl(u3U, UFFDIO_API, &ape_u);
+  } while ( -1 == ret_i && EAGAIN == errno );
+  if ( -1 == ret_i
+     || UFFD_API != ape_u.api
+     || 0 == (ape_u.features & UFFD_FEATURE_PAGEFAULT_FLAG_WP)
+     || 0 == (ape_u.ioctls & ( ((c3_d)1 << _UFFDIO_API)
+                             | ((c3_d)1 << _UFFDIO_REGISTER)
+                             | ((c3_d)1 << _UFFDIO_UNREGISTER) )) )
+  {
+    u3l_log("boot: userfaultfd does not support write-protect\r\n");
+    //u3l_log("      please upgrade to Linux 5.7 or later\n");
+    close(u3U);
+    u3U = -1;
+    return;
+  }
+
+  // Register the fd to send events for write-protected pages within loom
+  struct uffdio_register reg_u = {
+    .range = { .start = (c3_p)u3_Loom, .len = u3a_bytes, },
+    .mode = UFFDIO_REGISTER_MODE_WP,
+    .ioctls = 0,
+  };
+  do {
+    ret_i = ioctl(u3U, UFFDIO_REGISTER, &reg_u);
+  } while ( -1 == ret_i && EAGAIN == errno );
+  if ( -1 == ret_i
+     || 0 == (reg_u.ioctls & ((c3_d)1 << _UFFDIO_WRITEPROTECT)) )
+  {
+    u3l_log("boot: could not register userfaultfd: %s\r\n", strerror(errno));
+    close(u3U);
+    u3U = -1;
+    return;
+  }
+
+  // Launch thread to handle page faults
+  pthread_t ted_u;
+  if ( 0 != pthread_create(&ted_u, NULL, u3e_fault_thread, NULL) ) {
+    u3l_log("boot: failed to launch fault handler thread: %s\r\n", strerror(errno));
+    close(u3U);
+    u3U = -1;
+    return;
+  }
+
+  u3l_log("boot: registered userfaultfd\r\n");
+}
+#endif
+
 /* u3m_init(): start the environment.
 */
 void
@@ -1749,6 +1836,17 @@ u3m_init(void)
 
     u3l_log("loom: mapped %dMB\r\n", len_w >> 20);
   }
+
+#if defined(U3_OS_linux)
+  c3_c* env_c = getenv("URBIT_USERFAULTFD");
+  if ( NULL == env_c || 0 == strcmp(env_c, "1") ) {
+    // TODO: describe this sad hack!
+    memset(u3_Loom, 0, u3a_bytes);
+    _cm_userfaultfd();
+  } else {
+    u3U = -1;
+  }
+#endif
 }
 
 /* u3m_stop(): graceful shutdown cleanup. */
