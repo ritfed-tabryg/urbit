@@ -1765,6 +1765,9 @@ _cm_userfaultfd(void)
   struct uffdio_register reg_u = {
     .range = { .start = (c3_p)u3_Loom, .len = u3a_bytes, },
     .mode = UFFDIO_REGISTER_MODE_WP,
+    // We need UFFDIO_REGISTER_MODE_MISSING as well so completely missing pages
+    // fault as well: https://www.spinics.net/lists/kernel/msg3876472.html
+    .mode = UFFDIO_REGISTER_MODE_MISSING | UFFDIO_REGISTER_MODE_WP,
     .ioctls = 0,
   };
   do {

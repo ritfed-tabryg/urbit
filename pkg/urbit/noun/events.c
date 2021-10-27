@@ -164,7 +164,62 @@ u3e_fault_thread(void* ign_v)
       c3_assert(0);
     }
 
-    u3e_fault((void*)msg_u.arg.pagefault.address, 1);
+    // according to https://www.cons.org/cracauer/cracauer-userfaultfd.html
+    // we should un-writeprotect and *then* zero the page... weird
+    // quoting that page:
+    /*
+     * Proper sequence is important here.
+     *
+     * For the GC we expect that write-protected pages can only
+     * be pages already backed by physical pages.
+     * Regular writes into unprotected pages that come before
+     * reads need the page be filled.
+     *
+     * So we do the WP case first and get it out of the way.
+     * Then both of the other cases need the page read.
+     */
+
+    /*
+    +If you registered with both
+    +UFFDIO_REGISTER_MODE_MISSING | UFFDIO_REGISTER_MODE_WP then you
+    +need to think about the sequence in which you supply a page and undo
+    +write protect.  Note that there is a difference between writes into a
+    +WP area and into a !WP area.  The former will have
+    +UFFD_PAGEFAULT_FLAG_WP set, the latter UFFD_PAGEFAULT_FLAG_WRITE.
+    +The latter did not fail on protection but you still need to supply a
+    +page when UFFDIO_REGISTER_MODE_MISSING was used.
+    */
+
+    // The normal behavior on reading a nonexistent page is for a new, zeroed
+    // page to be allocated. But you have to do this manually when userfaultfd
+    // is watching a memory region, which I consider a bug but maintainers only
+    // consider a "documentation error..." Anyway, we have to zero the new page
+    // ourselves. See https://www.cons.org/cracauer/cracauer-userfaultfd.html
+
+    if ( msg_u.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP ) {
+        u3e_fault((void*)msg_u.arg.pagefault.address, 1);
+    }
+
+    if ( msg_u.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE ) {
+        fprintf(stderr, "zeroing page %p\r\n", (void*)msg_u.arg.pagefault.address);
+        c3_w off_w = (c3_w*)(msg_u.arg.pagefault.address) - u3_Loom;
+        c3_w pag_w = off_w >> u3a_page;
+
+        struct uffdio_zeropage zer_u = {
+            .range = { .start = (u3_Loom + (pag_w << u3a_page)), .len = (1 << (u3a_page + 2)), },
+            .mode = 0,
+        };
+        c3_i ret_i;
+        do {
+          ret_i = ioctl(u3U, UFFDIO_ZEROPAGE, &zer_u);
+        } while ( -1 == ret_i && EAGAIN == errno );
+        if ( -1 == ret_i ) {
+            fprintf(stderr, "failed to zero page %p: %s\r\n",
+                    (void*)msg_u.arg.pagefault.address, strerror(errno));
+        }
+        continue;
+        //fprintf(stderr, "new page %p\r\n", (void*)msg_u.arg.pagefault.address);
+    }
   }
 
   close(u3U);
