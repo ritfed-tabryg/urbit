@@ -1,0 +1,19 @@
+Tests conducted in a tmpfs at niceness -19,
+but with zram full so that messes with it a little
+
+# urbit 1.6 sigsegv
+
+real    5m54.752s
+user    5m53.094s
+sys     0m1.045s
+
+# urbit 1.6 userfaultfd
+
+#real 5m48.520s
+#user 
+
+real    5m39.490s
+user    5m37.375s
+sys     0m2.099s
+
+so about 5% faster...
