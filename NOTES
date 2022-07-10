@@ -1,0 +1,11 @@
+soft-dirty works on PPC, x86, amd64, MIPS... but not arm or arm64, which is kind of important for us.
+I'm going to see if we can get away with emulating it via whether a page is mapped from file or not.
+We could always fall back to this approach on Linux platforms without softdirty, but that's getting
+complicated; the only real perf difference would come from the extra mmap call & associated page table
+setup.
+
+On my shitty arm64 laptop:
+- a fork() of a proc with a 2GB loom mapped takes 0.2 ms
+- a mmap() of a 2GB loom on top of an existing one (clobbering the existing mapping according to Linux
+  source and POSIX 2017, which is what we want) takes ???? TODO ??? be sure to also consider the slight
+  cost of all the no longer cached pages

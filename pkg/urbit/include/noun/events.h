@@ -41,6 +41,22 @@
       typedef struct _u3e_pool {
         c3_c*     dir_c;                     //  path to
         c3_w      dit_w[u3a_pages >> 5];     //  touched since last save
+#       if defined(U3_OS_linux)
+        c3_w      psh_w;                     //  log2(OS page size)
+        c3_d      psz_d;                     //  OS page size
+        c3_i      map_i;                     //  /proc/self/pagemap FD
+        c3_i      clr_i;                     //  /proc/self/clear_refs FD
+        // TODO: are the nor_u.fid_i & sou_u.fid_i FDs ever closed?
+        // i.e. is the status quo that we should explicitly close map_i
+        // as well?
+        // TODO: how does pagemap interact with hugepages? if the 0th
+        // page is a 1GB hugepage, does map_d[1] refer to the page
+        // starting at 0x40000000 in the process's address space?
+        // TODO: is there an established Urbity way to get page size?
+        // TODO: we only ever need one of dit_w or map_d, union?
+        // (can't just disable based on arch because we may want to
+        // support weird/old kernels without CONFIG_CHECKPOINT_RESTORE)
+#       endif
         u3e_image nor_u;                     //  north segment
         u3e_image sou_u;                     //  south segment
       } u3e_pool;

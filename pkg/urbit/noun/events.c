@@ -501,6 +501,84 @@ _ce_patch_count_page(c3_w pag_w,
   return pgc_w;
 }
 
+/* _ce_patch_count_pages(): count dirty pages in [sar_w, end_w),
+** producing new counter.
+*/
+static c3_w
+_ce_patch_foreach_page(c3_w sar_w,
+                       c3_w end_w,
+                       c3_w pgc_w)
+{
+  c3_w i_w;
+
+# if defined(U3_OS_linux)
+  if ( -1 != u3P.map_i ) {
+    // assert(sar_w <= end_w);
+
+    c3_w per_w = u3a_page - u3P.psh_w;
+
+    c3_d lum_d = u3_Loom >> u3P.psh_w;
+    c3_d off_d = sar_w << per_w;
+    c3_d sek_d = (lum_d + off_d) * sizeof(c3_d);
+    // TODO: is the right header for lseek included?
+    if ( -1 == lseek(u3P.map_i, sek_d, SEEK_SET) ) {
+      // TODO: error
+      // bubble up NULL or bail?
+      bruh();
+    }
+
+    c3_w lef_w = (end_w - sar_w) << per_w;
+    // 128K was the fastest size for this buffer on my system; YMMV
+    c3_d buf_d[128*1024];
+    do {
+      ssize_t red_i;
+      do {
+        red_i = read(u3P.map_i, buf_d, c3_min(lef_w, sizeof(buf_d)));
+        if ( red_i > 0 ) {
+          lef_w -= red_i;
+        } else {
+          // TODO: error
+          // bubble up NULL or bail?
+          bruh();
+        }
+      // TODO: unaligned read output is probably impossible;
+      // this loop will probably never run twice; remove?
+      } while ( red_i % sizeof(c3_d) != 0 );
+      
+      // TODO: make sure hugepages aren't somehow turned on!!
+      // TODO: special-case 16k urbit pages out of 4k native
+      // pages with loading 4x64 AVX256 mask compare
+      c3_w mak_w = (1 << per_w) - 1;
+      c3_w pag_w;
+      // TODO: precompute x / y in for?
+      for ( pag_w = 0; pag_w < (c3_w)red_i / sizeof(c3_d); pag_w++ ) {
+        // 55th bit of the PTE signals soft-dirty
+        if ( buf_d[pag_w] & (1 << 55) ) {
+          pgc_w++;
+
+          // skip to next urbit page (may involve skipping multiple
+          // physical pages) as we already know this one's dirty
+          pag_w |= mak_w;
+        }
+      }
+    } while ( lef_w > 0 );
+  } else
+# endif
+  {
+    for ( i_w = sar_w; i_w < end_w; i_w++ ) {
+      // TODO: would lifting blk_w & bit_w calculation improve perf?
+      c3_w blk_w = (pag_w >> 5);
+      c3_w bit_w = (pag_w & 31);
+
+      if ( u3P.dit_w[blk_w] & (1 << bit_w) ) {
+        pgc_w++;
+      }
+    }
+  }
+
+  return pgc_w;
+}
+
 /* _ce_patch_save_page(): save a page, producing new page counter.
 */
 static c3_w
@@ -563,16 +641,11 @@ _ce_patch_compose(void)
 
   /* Count dirty pages.
   */
-  {
-    c3_w i_w;
+  pgs_w = _ce_patch_count_pages(0, nor_w, pgs_w);
+  pgs_w = _ce_patch_count_pages(u3a_pages - sou_w, u3a_pages, pgs_w);
 
-    for ( i_w = 0; i_w < nor_w; i_w++ ) {
-      pgs_w = _ce_patch_count_page(i_w, pgs_w);
-    }
-    for ( i_w = 0; i_w < sou_w; i_w++ ) {
-      pgs_w = _ce_patch_count_page((u3a_pages - (i_w + 1)), pgs_w);
-    }
-  }
+  // TODO: clear dirty pages later!
+  // TODO: wtf does the code below after u3_ce_patch* do
 
   if ( !pgs_w ) {
     return 0;
@@ -874,6 +947,38 @@ _ce_backup(void)
   close(sop_u.fid_i);
 }
 
+# if defined(U3_OS_linux)
+static void
+_ce_dirty_init(void)
+{
+  u3P.map_i = c3_open("/proc/self/pagemap", O_RDONLY);
+  if ( -1 == u3P.map_i ) {
+    u3l_log("error open TODO");
+    u3P.clr_i = -1;
+    return;
+  }
+
+  u3P.clr_i = c3_open("/proc/self/clear_refs", O_WRONLY);
+  if ( -1 == u3P.clr_i ) {
+    u3l_log("error open TODO");
+    close(u3P.map_i);
+    u3P.map_i = -1;
+    return;
+  }
+
+  _ce_clear_dirty(); // TODO: is this line necessary?
+}
+
+static void
+_ce_clear_dirty(void)
+{
+  write(u3P.clr_i, "4", 1);
+  // TODO make work
+  // TODO merge with other _ce_clear_dirty for bitmap
+  // TODO assert clr_i != -1 ?
+}
+# endif
+
 /*
   u3e_save(): save current changes.
 
@@ -947,7 +1052,16 @@ u3e_live(c3_o nuu_o, c3_c* dir_c)
 {
   //  require that our page size is a multiple of the system page size.
   //
-  c3_assert(0 == (1 << (2 + u3a_page)) % sysconf(_SC_PAGESIZE));
+  c3_d psz_d = sysconf(_SC_PAGESIZE);
+  c3_assert(0 == (1 << (2 + u3a_page)) % psz_d);
+
+# if defined(U3_OS_linux)
+  u3P.psz_d = psz_d;
+  // TODO: __builtin_clz returns int; should probably just cast to c3_w?
+  u3P.psh_w = log2(psz_d); // TODO: log2 impl with clz/bsr & fallback
+
+  _ce_dirty_init();
+# endif
 
   u3P.dir_c = dir_c;
   u3P.nor_u.nam_c = "north";
@@ -1022,6 +1136,14 @@ u3e_yolo(void)
 {
   //    NB: u3e_save() will reinstate protection flags
   //
+# if defined(U3_OS_linux)
+  if ( -1 != u3P.map_i ) {
+    // we are using Linux's PTE soft-dirty feature; there isn't
+    // a good reason to disable it (& it's hard to do so anyway)
+    return c3y;
+  }
+# endif
+
   if ( 0 != mprotect((void *)u3_Loom, u3a_bytes, (PROT_READ | PROT_WRITE)) ) {
     return c3n;
   }
@@ -1034,5 +1156,17 @@ u3e_yolo(void)
 void
 u3e_foul(void)
 {
+# if defined(U3_OS_linux)
+  if ( -1 != u3P.map_i ) {
+    // this is a no-op, except that mremap() sets the
+    // soft-dirty bit on all the "newly mapped" pages
+    if ( u3_Loom != mremap((void *)u3_Loom, u3a_bytes, u3a_bytes) ) {
+      // TODO: perror
+    }
+
+    return;
+  }
+# endif
+
   memset((void*)u3P.dit_w, 0xff, sizeof(u3P.dit_w));
 }
