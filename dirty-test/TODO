@@ -1,0 +1,3 @@
+does the dirty bit stay on if a MAP_PRIVATE modification gets swapped?
+i.e. you should write a program that intentionally writes so much to a MAP_PRIVATE mmap'd file
+that it has to put some of the modified stuff in swap. does the dirty bit remain set when that happens?

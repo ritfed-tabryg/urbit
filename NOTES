@@ -7,5 +7,6 @@ setup.
 On my shitty arm64 laptop:
 - a fork() of a proc with a 2GB loom mapped takes 0.2 ms
 - a mmap() of a 2GB loom on top of an existing one (clobbering the existing mapping according to Linux
-  source and POSIX 2017, which is what we want) takes ???? TODO ??? be sure to also consider the slight
-  cost of all the no longer cached pages
+  source and POSIX 2017, which is what we want) takes 0.005 ms (not considering the slight cost of tlb clear)
+
+OK, it turns out soft-dirty is precisely as fast as hard-dirty which is slower than userfaultfd which is as fast as libsigsegv. who knew?
