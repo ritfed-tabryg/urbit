@@ -71,6 +71,13 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#include <inttypes.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <time.h>
+
 #ifdef U3_SNAPSHOT_VALIDATION
 /* Image check.
 */
@@ -574,6 +581,8 @@ _ce_patch_compose(void)
     }
   }
 
+  fprintf(stderr, "\r\nsnap: %d dirty (urbit) pages\r\n", pgs_w);
+
   if ( !pgs_w ) {
     return 0;
   }
@@ -874,6 +883,12 @@ _ce_backup(void)
   close(sop_u.fid_i);
 }
 
+static inline int64_t difftimespec_ns(const struct timespec after, const struct timespec before)
+{
+    return ((int64_t)after.tv_sec - (int64_t)before.tv_sec) * (int64_t)1000000000
+         + ((int64_t)after.tv_nsec - (int64_t)before.tv_nsec);
+}
+
 /*
   u3e_save(): save current changes.
 
@@ -897,6 +912,9 @@ _ce_backup(void)
 void
 u3e_save(void)
 {
+  struct timespec start, end;
+  clock_gettime(CLOCK_MONOTONIC, &start);
+
   u3_ce_patch* pat_u;
 
   if ( u3C.wag_w & u3o_dryrun ) {
@@ -907,15 +925,31 @@ u3e_save(void)
     return;
   }
 
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  fprintf(stderr, "      compose: %09" PRIi64 " ns\r\n", difftimespec_ns(end, start));
+  clock_gettime(CLOCK_MONOTONIC, &start);
+
   // u3a_print_memory(stderr, "sync: save", 4096 * pat_u->con_u->pgs_w);
 
   _ce_patch_sync(pat_u);
+
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  fprintf(stderr, "      sync:    %09" PRIi64 " ns\r\n", difftimespec_ns(end, start));
+  clock_gettime(CLOCK_MONOTONIC, &start);
 
   if ( c3n == _ce_patch_verify(pat_u) ) {
     c3_assert(!"loom: save failed");
   }
 
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  fprintf(stderr, "      verify:  %09" PRIi64 " ns\r\n", difftimespec_ns(end, start));
+  clock_gettime(CLOCK_MONOTONIC, &start);
+
   _ce_patch_apply(pat_u);
+
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  fprintf(stderr, "      apply:   %09" PRIi64 " ns\r\n", difftimespec_ns(end, start));
+  clock_gettime(CLOCK_MONOTONIC, &start);
 
 #ifdef U3_SNAPSHOT_VALIDATION
   {
@@ -937,7 +971,14 @@ u3e_save(void)
   _ce_patch_free(pat_u);
   _ce_patch_delete();
 
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  fprintf(stderr, "      sync:    %09" PRIi64 " ns\r\n", difftimespec_ns(end, start));
+  clock_gettime(CLOCK_MONOTONIC, &start);
+
   _ce_backup();
+
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  fprintf(stderr, "      backup:  %09" PRIi64 " ns\r\n", difftimespec_ns(end, start));
 }
 
 /* u3e_live(): start the checkpointing system.
